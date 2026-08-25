@@ -21,7 +21,8 @@ use unicode_segmentation::*;
 
 use super::{
     DiagnosticSet, DisplayMap, InputContextMenuCapabilities, InputEditorStyle,
-    InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, WrappingIndent,
+    InputHighlighterFactory, MASK_CHAR, MaskPattern, NativeMenu, NumberStep, TextDecoration,
+    WrappingIndent,
     blink_cursor::BlinkCursor,
     change::Change,
     element::{EditorScrollbar, EditorScrollbarSnapshot, TextElement},
@@ -317,6 +318,7 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(crate) disabled: bool,
     pub(crate) readonly: bool,
     pub(crate) text_align: TextAlign,
+    pub(super) text_decorations: Vec<TextDecoration>,
     pub(super) masked: bool,
     pub(super) clean_on_escape: bool,
     pub(super) submit_on_enter: bool,
@@ -478,6 +480,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.last_bounds
     }
 
+    pub fn set_text_decorations(
+        &mut self,
+        decorations: Vec<TextDecoration>,
+        cx: &mut Context<Self>,
+    ) {
+        self.text_decorations = decorations;
+        cx.notify();
+    }
+
     pub fn diagnostic_popover(&self) -> Option<Rc<crate::input::DiagnosticEntry>> {
         self.diagnostic_popover.clone()
     }
@@ -625,6 +636,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             disabled: false,
             readonly: false,
             text_align: TextAlign::Left,
+            text_decorations: Vec::new(),
             masked: false,
             clean_on_escape: false,
             submit_on_enter: false,

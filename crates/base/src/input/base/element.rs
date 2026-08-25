@@ -1423,7 +1423,8 @@ impl<M: InputModeKind> TextElement<M> {
                     .then(|| {
                         compose_decoration_collections(
                             Vec::new(),
-                            state.extras.decoration_layers().into_iter(),
+                            std::iter::once(state.text_decorations.as_slice())
+                                .chain(state.extras.decoration_layers()),
                             visible_byte_range,
                         )
                     })

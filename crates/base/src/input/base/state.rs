@@ -2131,6 +2131,19 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.select_to(end, cx);
     }
 
+    /// Return the UTF-8 byte offset nearest a point in the rendered input.
+    ///
+    /// Returns None before the input has been laid out or when position is outside
+    /// the rendered input bounds. The returned offset follows the same masking,
+    /// alignment, font metrics, and scroll calculations used by pointer selection.
+    pub fn text_offset_at_position(&self, position: Point<Pixels>) -> Option<usize> {
+        self.last_layout.as_ref()?;
+        if !self.input_bounds.contains(&position) {
+            return None;
+        }
+        Some(self.index_for_mouse_position(position))
+    }
+
     pub(crate) fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
         // If the text is empty, always return 0
         if self.text.len() == 0 {
@@ -4499,6 +4512,75 @@ mod tests {
                 s.set_selected_range(100..100, cx);
                 assert_eq!(s.selected_range(), 11..11);
             });
+        });
+    }
+
+    #[gpui::test]
+    fn text_offset_at_position_requires_layout_and_input_bounds(cx: &mut TestAppContext) {
+        let view = InputView::build(cx, |state| state.default_value("hello world"));
+        let input = view.input.clone();
+
+        input.update(cx, |state, _| {
+            let layout = state.last_layout.take();
+            assert_eq!(
+                state.text_offset_at_position(state.input_bounds.center()),
+                None
+            );
+            state.last_layout = layout;
+        });
+
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.run_until_parked();
+        input.read_with(&mut cx, |state, _| {
+            let hello = state
+                .range_to_bounds(&(0..5))
+                .expect("hello is visible")
+                .center();
+            assert!(state.text_offset_at_position(hello).is_some());
+            assert_eq!(
+                state.text_offset_at_position(point(
+                    state.input_bounds.origin.x - px(1.),
+                    state.input_bounds.origin.y + state.input_bounds.size.height / 2.,
+                )),
+                None
+            );
+            assert_eq!(
+                state.text_offset_at_position(point(
+                    state.input_bounds.origin.x + state.input_bounds.size.width + px(1.),
+                    state.input_bounds.origin.y + state.input_bounds.size.height / 2.,
+                )),
+                None
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn text_offset_at_position_uses_scrolled_single_line_layout(cx: &mut TestAppContext) {
+        let value = format!("https://example.test/{}", "segment/".repeat(120));
+        let last = value.len() - 1;
+        let view = InputView::build(cx, move |state| state.default_value(value));
+        let input = view.input.clone();
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.set_selected_range(last..last, cx);
+                state.scroll_to(last, None, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        input.read_with(&mut cx, |state, _| {
+            assert!(state.scroll_offset().x < px(0.));
+            let visible_last = state
+                .range_to_bounds(&(last..last + 1))
+                .expect("the final byte was scrolled into view")
+                .center();
+            let offset = state
+                .text_offset_at_position(visible_last)
+                .expect("the visible text point is inside the input");
+            assert!(offset >= last.saturating_sub(1));
         });
     }
 

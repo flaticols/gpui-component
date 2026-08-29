@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use gpui::SharedString;
+
 use crate::{
     IconName, Sizable, Size, StyledExt,
     group_box::GroupBoxVariant,
@@ -7,7 +9,7 @@ use crate::{
     input::{Input, InputState},
     resizable_panel,
     setting::{SettingGroup, SettingPage},
-    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
+    sidebar::{Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
     App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
@@ -185,8 +187,8 @@ impl Settings {
                     .refine_style(&self.header_style)
                     .child(Input::new(&search_input).prefix(IconName::Search)),
             )
-            .child(
-                SidebarMenu::new().children(pages.iter().enumerate().map(|(page_ix, page)| {
+            .children(sections(pages).into_iter().map(|(label, run)| {
+                let menu = SidebarMenu::new().children(run.into_iter().map(|(page_ix, page)| {
                     let is_page_active =
                         selected_index.page_ix == page_ix && selected_index.group_ix.is_none();
                     SidebarMenuItem::new(page.title.clone())
@@ -233,9 +235,42 @@ impl Settings {
                                     }),
                             )
                         })
-                })),
-            )
+                }));
+
+                // Always a group, because `Sidebar` is generic over one item
+                // type and cannot hold two. An unlabelled run passes the empty
+                // label, which `SidebarGroup` draws no header for, so a caller
+                // that sets no sections gets the flat menu it got before.
+                SidebarGroup::new(label.unwrap_or_default()).child(menu)
+            }))
     }
+}
+
+/// Breaks the pages into the runs the sidebar draws, keeping each page's own
+/// index.
+///
+/// The index is the position in `pages` and **not** a position within a run:
+/// `SelectIndex::page_ix` addresses the caller's vec, and a deep link that had
+/// to know which section a page landed in would break every time one moved.
+///
+/// A run starts at a page naming a section and ends before the next one. Pages
+/// ahead of the first section form an unlabelled run, which is also what the
+/// whole list is when no page names a section at all.
+#[allow(clippy::type_complexity)]
+fn sections(pages: &[SettingPage]) -> Vec<(Option<SharedString>, Vec<(usize, &SettingPage)>)> {
+    let mut runs: Vec<(Option<SharedString>, Vec<(usize, &SettingPage)>)> = Vec::new();
+
+    for (page_ix, page) in pages.iter().enumerate() {
+        match (&page.section, runs.last_mut()) {
+            // Opens a run of its own.
+            (Some(label), _) => runs.push((Some(label.clone()), vec![(page_ix, page)])),
+            // Continues whatever is open.
+            (None, Some(run)) => run.1.push((page_ix, page)),
+            // The first pages, before anybody names a section.
+            (None, None) => runs.push((None, vec![(page_ix, page)])),
+        }
+    }
+    runs
 }
 
 impl Sizable for Settings {
@@ -404,5 +439,77 @@ impl RenderOnce for Settings {
                     self.render_active_page(&state, &filtered_pages, &options, window, cx)
                 })),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pages() -> Vec<SettingPage> {
+        vec![
+            SettingPage::new("Authentication"),
+            SettingPage::new("Collection"),
+            SettingPage::new("Script playground").section("Sandbox"),
+            SettingPage::new("Collections").section("This server"),
+            SettingPage::new("Environments"),
+        ]
+    }
+
+    #[test]
+    fn a_page_keeps_its_index_in_the_caller_s_vec() {
+        // `SelectIndex::page_ix` addresses the caller's own list. If grouping
+        // renumbered anything, every deep link would open the wrong page.
+        let pages = pages();
+        let runs = sections(&pages);
+
+        let seen: Vec<usize> = runs
+            .iter()
+            .flat_map(|(_, run)| run.iter().map(|(ix, _)| *ix))
+            .collect();
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_section_runs_until_the_next_one_names_itself() {
+        let pages = pages();
+        let runs = sections(&pages);
+
+        let shape: Vec<(Option<&str>, usize)> = runs
+            .iter()
+            .map(|(label, run)| (label.as_ref().map(|l| l.as_ref()), run.len()))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![(None, 2), (Some("Sandbox"), 1), (Some("This server"), 2)]
+        );
+    }
+
+    #[test]
+    fn pages_that_name_no_section_stay_one_unlabelled_run() {
+        // What every existing caller gets: the flat menu it had before.
+        let flat = vec![SettingPage::new("One"), SettingPage::new("Two")];
+        let runs = sections(&flat);
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0, None);
+        assert_eq!(runs[0].1.len(), 2);
+    }
+
+    #[test]
+    fn a_section_on_the_very_first_page_opens_no_empty_run_before_it() {
+        let leading = vec![
+            SettingPage::new("One").section("First"),
+            SettingPage::new("Two"),
+        ];
+        let runs = sections(&leading);
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].0.as_ref().map(|l| l.as_ref()), Some("First"));
+    }
+
+    #[test]
+    fn no_pages_is_no_runs_rather_than_one_empty_one() {
+        assert!(sections(&[]).is_empty());
     }
 }

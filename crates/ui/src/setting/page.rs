@@ -21,6 +21,13 @@ use crate::{
 #[derive(Clone)]
 pub struct SettingPage {
     pub(super) icon: Option<Icon>,
+    /// The section this page opens, if it opens one.
+    ///
+    /// `Some` starts a new run in the sidebar under this label; every page
+    /// after it belongs to that run until another page names one. `None` — the
+    /// default — continues whatever run is open, so a caller that sets none at
+    /// all gets exactly the flat list it got before.
+    pub(super) section: Option<SharedString>,
     resettable: bool,
     pub(super) default_open: bool,
     pub(super) title: SharedString,
@@ -34,6 +41,7 @@ impl SettingPage {
     pub fn new(title: impl Into<SharedString>) -> Self {
         Self {
             icon: None,
+            section: None,
             resettable: true,
             default_open: false,
             title: title.into(),
@@ -65,6 +73,18 @@ impl SettingPage {
     }
 
     /// Set the icon of the setting page.
+    /// Opens a labelled section in the sidebar, starting at this page.
+    ///
+    /// Pages are grouped by proximity rather than by a key: a section runs from
+    /// the page that names it to the page before the next one. That keeps
+    /// `SelectIndex::page_ix` an index into the caller's own `Vec<SettingPage>`
+    /// — grouping is presentation, and a deep link that had to know which
+    /// section a page ended up in would break every time one moved.
+    pub fn section(mut self, section: impl Into<SharedString>) -> Self {
+        self.section = Some(section.into());
+        self
+    }
+
     pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.icon = Some(icon.into());
         self

@@ -59,7 +59,11 @@ impl<E: SidebarItem> SidebarItem for SidebarGroup<E> {
 
         v_flex()
             .relative()
-            .when(!self.collapsed, |this| {
+            // An empty label draws no header at all. A group is also how a
+            // caller says "these belong together" with nothing to call them,
+            // and reserving an `h_8` for a label that is not there puts a gap
+            // above the list with nothing in it.
+            .when(!self.collapsed && !self.label.is_empty(), |this| {
                 this.child(
                     h_flex()
                         .flex_shrink_0()
